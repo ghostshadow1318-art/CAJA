@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventario General con Historial Detallado</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f4f6f9;
+            color: #333;
+        }
+        h2, h3 { color: #2c3e50; text-align: center; }
+        
+        /* Formulario */
+        .form-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .form-group { display: flex; flex-direction: column; flex: 1; min-width: 130px; }
+        label { font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #555; }
+        input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        
+        button {
+            background-color: #27ae60; color: white; border: none; padding: 10px 15px;
+            border-radius: 4px; cursor: pointer; font-weight: bold; transition: background 0.3s;
+        }
+        button:hover { background-color: #219653; }
+        
+        /* Tablas */
+        .table-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 25px;
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; margin-top: 10px; }
+        th { background-color: #34495e; color: white; padding: 12px; }
+        td { padding: 10px; border-bottom: 1px solid #ddd; }
+        tr:hover { background-color: #f1f2f6; }
+        
+        /* Botones de acción */
+        .btn-ver { background-color: #3498db; font-size: 11px; padding: 6px 10px; border-radius: 3px; border: none; color: white; cursor: pointer;}
+        .btn-ver:hover { background-color: #2980b9; }
+        
+        /* Sección del Historial Oculto/Detalle */
+        .historial-container {
+            display: none; 
+            background: #fff;
+            border: 2px solid #3498db;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        }
+        .cerrar-historial { background-color: #7f8c8d; float: right; padding: 5px 10px; font-size: 12px; border: none; color: white; border-radius: 3px; cursor: pointer;}
+        .cerrar-historial:hover { background-color: #95a5a6; }
+    </style>
+</head>
+<body>
+
+    <h2>Sistema de Inventario (Costo Promedio Ponderado)</h2>
+
+    <div class="form-container">
+        <div class="form-group">
+            <label>Fecha</label>
+            <input type="date" id="fecha" required>
+        </div>
+        <div class="form-group">
+            <label>Producto</label>
+            <input type="text" id="producto" placeholder="Ej. Coca, Galleta" required>
+        </div>
+        <div class="form-group">
+            <label>Concepto</label>
+            <input type="text" id="concepto" placeholder="Ej. Compra, Venta" required>
+        </div>
+        <div class="form-group">
+            <label>Movimiento</label>
+            <select id="tipoMovimiento" onchange="alternarCampos()">
+                <option value="Entrada">Entrada</option>
+                <option value="Salida">Salida</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Cantidad</label>
+            <input type="number" id="cantidad" min="1" placeholder="0" required>
+        </div>
+        <div class="form-group" id="grupoCosto">
+            <label>Costo Unitario ($)</label>
+            <input type="number" id="costoUnitario" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <button type="button" onclick="registrarMovimiento()">Registrar Movimiento</button>
+    </div>
+
+    <div class="table-section">
+        <h3>TABLA GENERAL (Estado Actual de Productos)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Producto</th>
+                    <th>Concepto</th>
+                    <th>Entrada</th>
+                    <th>Salida</th>
+                    <th>Existencia</th>
+                    <th>Costo Promedio ($)</th>
+                    <th>Debe ($)</th>
+                    <th>Haber ($)</th>
+                    <th>Saldo ($)</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="tablaGeneral">
+                </tbody>
+        </table>
+    </div>
+
+    <div id="seccionHistorial" class="historial-container">
+        <button class="cerrar-historial" onclick="cerrarHistorial()">Cerrar Detalle ✕</button>
+        <h3 id="tituloHistorial">Historial Detallado de: </h3>
+        <table style="margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Concepto</th>
+                    <th>Entrada</th>
+                    <th>Salida</th>
+                    <th>Existencia</th>
+                    <th>Costo Unitario ($)</th>
+                    <th>Saldo ($)</th>
+                </tr>
+            </thead>
+            <tbody id="tablaHistorialDetalle">
+                </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Fecha de hoy por defecto
+        document.getElementById('fecha').value = new Date().toISOString().split('T')[0];
+
+        // Base de datos en memoria
+        let baseDatosInventario = {};
+
+        function alternarCampos() {
+            const tipo = document.getElementById('tipoMovimiento').value;
+            const grupoCosto = document.getElementById('grupoCosto');
+            grupoCosto.style.display = (tipo === 'Salida') ? 'none' : 'flex';
+        }
+
+        function registrarMovimiento() {
+            const fecha = document.getElementById('fecha').value;
+            const productoInput = document.getElementById('producto').value.trim();
+            const productoKey = productoInput.toUpperCase(); 
+            const concepto = document.getElementById('concepto').value.trim();
+            const tipo = document.getElementById('tipoMovimiento').value;
+            const cantidad = parseInt(document.getElementById('cantidad').value);
+            let costoUnitarioRegistro = parseFloat(document.getElementById('costoUnitario').value) || 0;
+
+            if (!productoInput || !concepto || isNaN(cantidad) || cantidad <= 0) {
+                alert("Por favor, llena todos los campos correctamente.");
+                return;
+            }
+
+            if (!baseDatosInventario[productoKey]) {
+                baseDatosInventario[productoKey] = [];
+            }
+
+            const historial = baseDatosInventario[productoKey];
+
+            let ultimaExistencia = 0;
+            let ultimoCostoPromedio = 0;
+            let ultimoSaldo = 0;
+
+            if (historial.length > 0) {
+                const ultimoReg = historial[historial.length - 1];
+                ultimaExistencia = ultimoReg.existencia;
+                ultimoCostoPromedio = ultimoReg.costoPromedioActual;
+                ultimoSaldo = ultimoReg.saldoActual;
+            }
+
+            let entrada = 0, salida = 0, existencia = 0;
+            let debe = 0, haber = 0, saldoCalculado = 0, costoPromedioCalculado = 0;
+            let costoUnitarioParaHistorial = 0;
+
+            if (tipo === 'Entrada') {
+                if (costoUnitarioRegistro <= 0) {
+                    alert("Las entradas requieren un costo unitario mayor a 0.");
+                    return;
+                }
+                entrada = cantidad;
+                existencia = ultimaExistencia + entrada;
+                debe = entrada * costoUnitarioRegistro;
+                saldoCalculado = ultimoSaldo + debe;
+                costoPromedioCalculado = existencia > 0 ? (saldoCalculado / existencia) : 0;
+                costoUnitarioParaHistorial = costoUnitarioRegistro; // El precio de compra real
+            } else { // Salida
+                if (cantidad > ultimaExistencia) {
+                    alert(`Error: Stock insuficiente. Existencia actual de ${productoInput}: ${ultimaExistencia}`);
+                    return;
+                }
+                salida = cantidad;
+                existencia = ultimaExistencia - salida;
+                costoPromedioCalculado = ultimoCostoPromedio; 
+                haber = salida * costoPromedioCalculado;
+                saldoCalculado = ultimoSaldo - haber;
+                costoUnitarioParaHistorial = ultimoCostoPromedio; // Las salidas salen al costo promedio actual
+            }
+
+            // Guardamos todo en el historial interno del producto
+            const nuevoPaso = {
+                fecha, 
+                concepto, 
+                entrada, 
+                salida, 
+                existencia,
+                costoUnitario: parseFloat(costoUnitarioParaHistorial.toFixed(2)), // Guardamos el costo unitario específico de este movimiento
+                costoPromedioActual: parseFloat(costoPromedioCalculated.toFixed(2)),
+                debe: parseFloat(debe.toFixed(2)),
+                haber: parseFloat(haber.toFixed(2)),
+                saldoActual: parseFloat(saldoCalculado.toFixed(2))
+            };
+            historial.push(nuevoPaso);
+
+            actualizarTablaGeneral();
+            limpiarFormulario();
+            
+            if (document.getElementById('seccionHistorial').style.display === 'block' && 
+                document.getElementById('tituloHistorial').innerText.includes(productoKey)) {
+                verDetalleProducto(productoKey);
+            }
+        }
+
+        function actualizarTablaGeneral() {
+            const tbody = document.getElementById('tablaGeneral');
+            tbody.innerHTML = '';
+
+            for (const productoKey in baseDatosInventario) {
+                const historial = baseDatosInventario[productoKey];
+                if (historial.length === 0) continue;
+
+                const ultimoRegistro = historial[historial.length - 1];
+
+                let totalEntradas = 0, totalSalidas = 0, totalDebe = 0, totalHaber = 0;
+                historial.forEach(item => {
+                    totalEntradas += item.entrada;
+                    totalSalidas += item.salida;
+                    totalDebe += item.debe;
+                    totalHaber += item.haber;
+                });
+
+                const fila = document.createElement('tr');
+                fila.innerHTML = `
+                    <td>${ultimoRegistro.fecha}</td>
+                    <td><strong>${productoKey}</strong></td>
+                    <td>${ultimoRegistro.concepto}</td>
+                    <td>${totalEntradas || '-'}</td>
+                    <td>${totalSalidas || '-'}</td>
+                    <td><strong style="color: #27ae60;">${ultimoRegistro.existencia}</strong></td>
+                    <td>$${ultimoRegistro.costoPromedioActual.toFixed(2)}</td>
+                    <td>$${totalDebe.toFixed(2)}</td>
+                    <td>$${totalHaber.toFixed(2)}</td>
+                    <td><strong>$${ultimoRegistro.saldoActual.toFixed(2)}</strong></td>
+                    <td>
+                        <button class="btn-ver" onclick="verDetalleProducto('${productoKey}')">Ver Movimientos 📊</button>
+                    </td>
+                `;
+                tbody.appendChild(fila);
+            }
+        }
+
+        function verDetalleProducto(productoKey) {
+            const historial = baseDatosInventario[productoKey];
+            const seccion = document.getElementById('seccionHistorial');
+            const titulo = document.getElementById('tituloHistorial');
+            const tbodyDetalle = document.getElementById('tablaHistorialDetalle');
+
+            titulo.innerText = `Historial Detallado (Kardex) de: ${productoKey}`;
+            tbodyDetalle.innerHTML = '';
+
+            // Rellenar la tabla de abajo con la nueva estructura simplificada
+            historial.forEach(item => {
+                const fila = document.createElement('tr');
+                fila.innerHTML = `
+                    <td>${item.fecha}</td>
+                    <td>${item.concepto}</td>
+                    <td>${item.entrada || '-'}</td>
+                    <td>${item.salida || '-'}</td>
+                    <td><strong>${item.existencia}</strong></td>
+                    <td>$${item.costoUnitario.toFixed(2)}</td>
+                    <td><strong>$${item.saldoActual.toFixed(2)}</strong></td>
+                `;
+                tbodyDetalle.appendChild(fila);
+            });
+
+            seccion.style.display = 'block';
+            seccion.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function cerrarHistorial() {
+            document.getElementById('seccionHistorial').style.display = 'none';
+        }
+
+        function limpiarFormulario() {
+            document.getElementById('producto').value = '';
+            document.getElementById('concepto').value = '';
+            document.getElementById('cantidad').value = '';
+            document.getElementById('costoUnitario').value = '';
+            document.getElementById('tipoMovimiento').value = 'Entrada';
+            alternarCampos();
+        }
+    </script>
+</body>
+</html>
